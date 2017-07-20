@@ -1,0 +1,304 @@
+<!--<link rel="import" href="/bower_components/polymer/polymer-element.html">-->
+<script src="camera-pose.js"></script>
+<dom-module id="plane-detector">
+  <script>
+
+    const defaultPose = {
+      orientation: Float32Array.from([0, 0, 0, 1]),
+      position: Float32Array.from([0, 0, 0])
+    };
+
+    class SurfaceDetector extends Polymer.Element {
+      static get is() { return 'surface-detector'; }
+
+      static get properties() {
+        return {
+          barcodeDetector: {
+            type: Object,
+            readOnly: true,
+            value: () => new BarcodeDetector()
+          },
+
+          imageCapture: {
+            type: Object
+          },
+
+          active: {
+            type: Boolean,
+            value: false
+          },
+
+          surfaces: {
+            type: Array,
+            readOnly: true,
+            notify: true,
+            value: () => []
+          },
+
+          sourceRect: {
+            type: Object
+          },
+
+          vrDisplay: {
+            type: Object,
+            readOnly: true
+          },
+
+          cameraPose: {
+            type: Object,
+            readOnly: true
+          },
+
+          cameraPoseCache: {
+            type: Object,
+            readOnly: true,
+            value: () => new CameraPoseCache()
+          },
+
+          modelSize: {
+            type: Number,
+            value: 51
+            //value: 102
+          },
+
+          posit: {
+            type: Object,
+            computed: '__computePosit(modelSize)'
+          }
+        };
+      }
+
+      static get observers() {
+        return ['__toggleActive(active, imageCapture)']
+      }
+
+      constructor() {
+        super();
+        this.cameraPoseHistory = new Map();
+        this.cornerGroupHistory = {};
+      }
+
+      ready() {
+        this.__vrDisplayReady = false;
+        navigator.getVRDisplays().then(vrDisplays => {
+          this._setVrDisplay(vrDisplays[0]);
+          this._setCameraPose(new CameraPose(this.vrDisplay));
+          this.__vrDisplayReady = true;
+        });
+      }
+
+      detect() {
+        if (this.imageCapture == null ||
+            this.posit == null ||
+            this.__vrDisplayReady === false) {
+          return new Promise(resolve => requestAnimationFrame(resolve));
+        }
+
+        let initialPose = this.cameraPoseCache.allocateFor(this.vrDisplay);
+        let middlePose;
+        let finalPose;
+        let distance;
+
+        initialPose.update();
+
+        return this.imageCapture.grabFrame()
+          .then(frame => {
+
+            middlePose = this.cameraPoseCache.allocateFor(this.vrDisplay);
+            middlePose.update();
+
+            distance = Math.abs(initialPose.distanceTo(middlePose));
+
+            if (distance > 2) {
+              return;
+            }
+
+            return this.barcodeDetector.detect(frame)
+                .then(codes => {
+                  finalPose = this.cameraPoseCache.allocateFor(this.vrDisplay);
+                  finalPose.update();
+
+                  distance = Math.abs(initialPose.distanceTo(finalPose));
+
+                  if (distance > 4) {
+                    return;
+                  }
+
+                  distance = Math.abs(middlePose.distanceTo(finalPose));
+
+                  if (distance > 2) {
+                    return;
+                  }
+
+                  this.__updateSurfaces(this.sourceRect, codes, middlePose);
+                });
+          })
+          .then(() => {
+            this.cameraPoseCache.free(initialPose);
+            this.cameraPoseCache.free(middlePose);
+            this.cameraPoseCache.free(finalPose);
+          });
+      }
+
+      __computePosit(modelSize) {
+        return new POS.Posit(modelSize, 256);
+      }
+
+      __toggleActive(active, imageCapture) {
+        if (active && imageCapture != null) {
+          this.__polling = true;
+          this.__poll();
+        } else {
+          this.__polling = false;
+        }
+      }
+
+      __poll() {
+        this.detect().then(() => {
+          if (this.__polling) {
+            this.__poll();
+          }
+        })
+      }
+
+      /*
+      __averagePoseFor(vrDisplay) {
+        const history = this.cameraPoseHistory.get(vrDisplay) || [];
+
+      }
+      */
+
+      __derivePose(cameraPose) {
+        const cameraPoseHistory = this.cameraPoseHistory.get(cameraPose.vrDisplay) || [];
+        const nextPose = CameraPose.from(cameraPose, this.cameraPoseCache);
+
+        if (!this.cameraPoseHistory.has(cameraPoseHistory)) {
+          this.cameraPoseHistory.set(cameraPose.vrDisplay, cameraPoseHistory);
+        }
+
+        cameraPoseHistory.unshift(nextPose);
+
+        if (cameraPoseHistory.length < 5) {
+          return;
+        } else if (cameraPoseHistory.length > 5) {
+          this.cameraPoseCache.free(cameraPoseHistory.pop());
+        }
+
+        const averageDistance = cameraPoseHistory.reduce((totalDistance, oldCameraPose) => {
+          return totalDistance + Math.abs(oldCameraPose.distanceTo(cameraPose));
+        }, 0) / cameraPoseHistory.length;
+
+        if (averageDistance > 5) {
+          return;
+        }
+
+        return nextPose;
+      }
+
+      __normalizeCornerGroups(codes, frame) {
+        const cornerGroupHistory = this.cornerGroupHistory;
+        const cornerGroups = codes.map((code, index) => {
+          const normalizedCorners = code.cornerPoints.map((point, index) => {
+            let x = (point.x - frame.left) / frame.width;
+            let y = (point.y - frame.top) / frame.height;
+
+            return { x, y };
+          });
+          const id = code.rawValue;
+
+          if (cornerGroupHistory[id] == null) {
+            cornerGroupHistory[id] = [];
+          }
+
+          const history = cornerGroupHistory[id];
+
+          history.unshift(normalizedCorners);
+
+          if (history.length > 10) {
+            history.pop();
+          } else if (history.length < 10) {
+            return null;
+          };
+
+          return normalizedCorners.map((corner, index) => {
+            let { x, y } = corner;
+
+            for (let i = 1; i < history.length; ++i) {
+              const historicalCorner = history[i][index];
+
+              x += historicalCorner.x;
+              y += historicalCorner.y;
+            }
+
+            x /= history.length;
+            y /= history.length;
+
+            x -= 0.5;
+            y -= 0.5;
+
+            return { x, y };
+          });
+        });
+
+        return cornerGroups;
+      }
+
+      __generateSurfaces(cameraPose, cornerGroups, frame, codes) {
+        return cornerGroups.map((cornerGroup, index) => {
+          if (cornerGroup == null) {
+            return;
+          }
+
+          const positPose = this.posit.pose(cornerGroup);
+          // TODO: This is costly, generating a bunch of typed arrays that will just
+          // be thrown away.
+          const orientation = new THREE.Matrix4();
+          const position = new THREE.Vector3(...positPose.bestTranslation);
+
+          const basisVectors = positPose.bestRotation.map(
+              rowArray => new THREE.Vector3(...rowArray));
+
+          orientation.makeBasis(...basisVectors);
+
+          return {
+            id: codes[index].rawValue,
+            corners: cornerGroup,
+            orientation,
+            position,
+            cameraPose,
+            viewport: {
+              width: frame.width,
+              height: frame.height
+            }
+          };
+        }).filter(surface => surface != null);
+      }
+
+      __updateSurfaces(frame, codes, cameraPose) {
+        if (codes.length === 0) {
+          return;
+        }
+
+        const derivedCameraPose = this.__derivePose(cameraPose);
+
+        if (derivedCameraPose == null) {
+          return;
+        }
+
+        const { orientation, position } = derivedCameraPose;
+
+        const normalizedCornerGroups = this.__normalizeCornerGroups(codes, frame);
+
+        if (normalizedCornerGroups.length === 0) {
+          return;
+        }
+
+        const surfaces = this.__generateSurfaces(derivedCameraPose, normalizedCornerGroups, frame, codes);
+
+        this._setSurfaces(surfaces);
+      }
+    }
+
+    customElements.define(SurfaceDetector.is, SurfaceDetector);
+  </script>
+</dom-module>

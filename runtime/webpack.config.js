@@ -2,7 +2,8 @@ let path = require("path");
 
 let sources = [
   "demo/demo.js",
-  "vr-demo/vr-demo.js"
+  "vr-demo/vr-demo.js",
+  "ar-demo/ar-demo.js"
 ]
 
 module.exports = sources.map(s => new Object({

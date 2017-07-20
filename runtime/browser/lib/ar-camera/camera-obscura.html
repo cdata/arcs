@@ -1,0 +1,144 @@
+<!--<link rel="import" href="/bower_components/polymer/polymer-element.html">-->
+<!--<link rel="import" href="/bower_components/app-media/app-media.html">-->
+<link rel="import" href="surface-detector.html">
+<dom-module id="camera-obscura">
+  <template>
+    <style>
+      :host {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+      }
+
+      .point {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 16px;
+        height: 16px;
+        background-color: red;
+        z-index: 1;
+      }
+
+      app-media-video {
+        position: absolute;
+        top: 0;
+        left: 0;
+      }
+    </style>
+    <app-media-stream
+        stream="{{stream}}"
+        video-constraints='{"facingMode": "environment"}'
+        active>
+    </app-media-stream>
+    <app-media-image-capture
+        id="capture"
+        stream="[[stream]]"
+        image-capture="{{imageCapture}}">
+    </app-media-image-capture>
+    <surface-detector
+        id="detector"
+        image-capture="[[imageCapture]]"
+        source-rect="[[sourceRect]]"
+        surfaces="{{surfaces}}"
+        active>
+    </surface-detector>
+
+    <app-media-video
+        id="video"
+        source="[[stream]]"
+        source-rect="{{sourceRect}}"
+        autoplay
+        muted>
+    </app-media-video>
+
+    <slot id="slot"></slot>
+
+    <div id="corners">
+      <template is="dom-repeat" items="[[points]]" as="point">
+        <div class="point" style="transform:translate(-50%, -50%); top: calc(({{point.y}} + 0.5) * 100%); left: calc(({{point.x}} + 0.5) * 100%) "></div>
+      </template>
+    </div>
+
+  </template>
+  <script>
+    class CameraObscura extends Polymer.Element {
+      static get is() { return 'camera-obscura'; }
+
+      static get properties() {
+        return {
+          stream: {
+            type: Object,
+            notify: true
+          },
+
+          surfaces: {
+            type: Array,
+            notify: true,
+            value: () => [],
+            observer: '__surfacesChanged'
+          },
+
+          points: {
+            type: Array,
+            computed: '__computePoints(surfaces)'
+          },
+
+          scene: {
+            type: Object
+          }
+        };
+      }
+
+      static get observers() {
+        return [
+          '__surfacesChanged(surfaces, scene)'
+        ];
+      }
+
+      connectedCallback() {
+        super.connectedCallback();
+
+        const video = this.$.video.videoElement;
+        const slot = this.$.slot;
+        const notifyVideoPlaying = () => {
+          requestAnimationFrame(() => {
+            console.log('Playing camera video!');
+            console.log(this.$.video.videoElement.videoWidth);
+            this.dispatchEvent(new CustomEvent('play'));
+          });
+        };
+
+        video.addEventListener('play', notifyVideoPlaying);
+
+        if (video.currentTime > 0) {
+          notifyVideoPlaying();
+        }
+
+        Polymer.RenderStatus.afterNextRender('dist', () => {
+          const scene = slot.assignedNodes().filter(
+              node => node.tagName === 'A-SCENE').pop();
+
+          this.scene = scene;
+        });
+      }
+
+      __computePoints(surfaces) {
+        return surfaces.reduce((points, surface) =>
+            points.concat(surface.corners), []);
+      }
+
+      __surfacesChanged() {
+        if (!this.surfaces.length || !this.scene) {
+          return;
+        }
+
+        this.scene.systems.surface.setSurfaces(this.surfaces);
+      }
+    }
+
+    customElements.define(CameraObscura.is, CameraObscura);
+  </script>
+</dom-module>

@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>A-Frame VR Demo</title>
+    <meta name="description" content="An A-Frame VR demo">
+    <script src="https://aframe.io/releases/0.6.0/aframe.min.js"></script>
+    <script src="surface-system.js"></script>
+    <script src="/bower_components/js-aruco/src/svd.js"></script>
+    <script src="/bower_components/js-aruco/src/posit1.js"></script>
+    <link rel="import" href="/bower_components/polymer/polymer-element.html">
+    <script src="x-debug.js"></script>
+
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <link rel="import" href="camera-obscura.html">
+    <style>
+      body {
+        margin: 0;
+        padding: 0;
+      }
+
+      #stats .x:before {
+        content: 'x: ';
+      }
+
+      #stats .y:before {
+        content: 'y: ';
+      }
+
+      #stats .z:before {
+        content: 'z: ';
+      }
+    </style>
+  </head>
+  <body>
+    <script>
+
+    </script>
+    <x-debug></x-debug>
+    <camera-obscura>
+      <a-scene id="scene" surface inspector="url: https://cdn.rawgit.com/aframevr/aframe-inspector/v0.6.0/dist/aframe-inspector.min.js"></a-scene>
+    </camera-obscura>
+    <script>
+      scene.addEventListener('anchor-added', e => console.log(e.detail.anchor.id, 'added!'));
+    </script>
+  </body>
+</html>
