@@ -24,6 +24,7 @@ const sources = {
     'test/test.js',
     'demo/demo.js',
     'vr-demo/vr-demo.js',
+    'arcs.js',
     'particle-ui-tester/particle-ui-tester.js',
     'worker-entry.js',
     'planner.js'

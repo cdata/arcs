@@ -37,7 +37,7 @@ let template = Object.assign(document.createElement('template'), {innerHTML: `
 </style>
 
 <x-toast open suggestion-container>
-  <div slot="header"><img src="../assets/dots.png"></div>
+  <div slot="header"><img src="/lib/assets/dots.png"></div>
   <suggestions></suggestions>
 </x-toast>
 
